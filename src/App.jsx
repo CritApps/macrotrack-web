@@ -28,7 +28,7 @@ const db = getFirestore(app);
 // --- HELPER: FIX TIMEZONE DATE ---
 // Converts UTC Timestamp -> "YYYY-MM-DD" in YOUR Local Time
 const getLocalDate = (isoString) => {
-  if (!isoString || !isoString.includes('T')) return isoString; // Return as-is if not ISO
+  if (!isoString || !isoString.includes('T')) return isoString; 
   const date = new Date(isoString);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -135,10 +135,10 @@ function App() {
     const defaults = { chartData: [], weightData: [], averages: {}, targets: {}, heatmapData: [], heatmapStats: {total:0, green:0, yellow:0, red:0}, selectedMeals: [], macroComparisonData: [], macroSplit: {}, dailyTotals: {cal:0, p:0, c:0, f:0} };
     if (!data) return defaults;
 
-    // 1. Process History (FIXED: Uses getLocalDate for timezone awareness)
+    // 1. Process History (Uses getLocalDate for timezone awareness)
     const rawMap = {};
     (data.history || []).forEach(item => {
-      const d = getLocalDate(item.date); // FIX APPLIED HERE
+      const d = getLocalDate(item.date); 
       if (!rawMap[d]) rawMap[d] = { date: d, calories: 0, p: 0, c: 0, f: 0 };
       rawMap[d].calories += (Number(item.calories) || 0);
       rawMap[d].p += (Number(item.p) || 0);
@@ -153,18 +153,16 @@ function App() {
       if (timeRange === 'all') return arr;
       const days = parseInt(timeRange);
       const cutoff = new Date();
-      cutoff.setDate(new Date().getDate() - days); // Use today as anchor
+      cutoff.setDate(new Date().getDate() - days); 
       return arr.filter(d => new Date(d.date) >= cutoff);
     };
 
     const filteredHistory = filterByRange(processed);
     
-    // 3. Weight + Smoothing (FIXED Timezone)
+    // 3. Weight + Smoothing
     let wData = (data.weightHistory || []).sort((a, b) => new Date(a.date) - new Date(b.date));
-    // Ensure weight dates are also treated as local if necessary
     wData = wData.map(w => ({...w, date: getLocalDate(w.date)}));
     
-    // Recalculate moving avg
     wData = wData.map((entry, index, arr) => {
       const start = Math.max(0, index - 6);
       const subset = arr.slice(start, index + 1);
@@ -208,7 +206,7 @@ function App() {
       f: Math.round(((avgs.f * 9) / totalCalsActual) * 100),
     };
 
-    // 8. Heatmap & Stats (FIXED: Use getLocalDate)
+    // 8. Heatmap & Stats
     const heatData = [];
     const stats = { total: 0, green: 0, yellow: 0, red: 0 };
     const today = new Date();
@@ -216,7 +214,6 @@ function App() {
     for (let i = 364; i >= 0; i--) {
       const d = new Date();
       d.setDate(today.getDate() - i);
-      // Construct YYYY-MM-DD from local time
       const y = d.getFullYear();
       const m = String(d.getMonth()+1).padStart(2,'0');
       const dayStr = String(d.getDate()).padStart(2,'0');
@@ -246,7 +243,6 @@ function App() {
     let mealsForDay = [];
     let dTotals = { cal: 0, p: 0, c: 0, f: 0 };
     if (selectedDate && data.history) {
-      // We must check if the processed local date matches the selected date
       mealsForDay = data.history.filter(h => getLocalDate(h.date) === selectedDate);
       
       dTotals = mealsForDay.reduce((acc, curr) => ({
@@ -486,7 +482,8 @@ function App() {
           <div className="relative w-full max-w-md bg-white shadow-2xl h-full p-6 overflow-y-auto animate-slide-in flex flex-col">
             <div className="flex-none">
               <button onClick={() => setShowInspector(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
-              <h2 className="text-2xl font-bold text-gray-900 mb-1">{selectedDate ? new Date(selectedDate).toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'}) : 'Log Details'}</h2>
+              {/* FIXED: Manually append time to force local parsing */}
+              <h2 className="text-2xl font-bold text-gray-900 mb-1">{selectedDate ? new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'}) : 'Log Details'}</h2>
               <p className="text-gray-500 mb-6">Daily Log Breakdown</p>
             </div>
             
