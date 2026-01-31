@@ -62,7 +62,7 @@ const formatDateLabel = (dateStr) => {
 const GoalLine = (props) => {
   const { cx, cy } = props;
   if (!cx || !cy) return null;
-  return <line x1={cx} y1={cy - 12} x2={cx} y2={cy + 12} stroke="#000" strokeWidth={3} strokeLinecap="round" />;
+  return <line x1={cx} y1={cy - 12} x2={cx} y2={cy + 12} stroke="#10B981" strokeWidth={3} strokeLinecap="round" />;
 };
 
 const CustomGoalTooltip = ({ active, payload }) => {
