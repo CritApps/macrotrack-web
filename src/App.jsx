@@ -25,6 +25,17 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// --- HELPER: FIX TIMEZONE DATE ---
+// Converts UTC Timestamp -> "YYYY-MM-DD" in YOUR Local Time
+const getLocalDate = (isoString) => {
+  if (!isoString || !isoString.includes('T')) return isoString; // Return as-is if not ISO
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // --- CUSTOM COMPONENTS ---
 const GoalLine = (props) => {
   const { cx, cy } = props;
@@ -75,22 +86,16 @@ function App() {
   useEffect(() => {
     let unsubscribe;
     if (showLoginModal && !userId) {
-      // 1. Generate a random session ID
       const sessionId = Math.random().toString(36).substring(2, 15);
       setQrSessionId(sessionId);
-
-      // 2. Create the session doc in Firestore
       const sessionRef = doc(db, 'login_sessions', sessionId);
       setDoc(sessionRef, { status: 'waiting', created: new Date() });
-
-      // 3. Listen for changes (Mobile app writing the User ID)
       unsubscribe = onSnapshot(sessionRef, (snap) => {
         const data = snap.data();
         if (data && data.userId) {
-          // MOBILE SCANNED IT!
           setUserId(data.userId);
           fetchData(data.userId);
-          setShowLoginModal(false); // Close modal
+          setShowLoginModal(false);
         }
       });
     }
@@ -125,29 +130,41 @@ function App() {
     setLoading(false);
   };
 
-  // --- DATA ENGINE (Same as before) ---
+  // --- DATA ENGINE ---
   const { chartData, weightData, averages, targets, heatmapData, heatmapStats, selectedMeals, macroComparisonData, macroSplit, dailyTotals } = useMemo(() => {
     const defaults = { chartData: [], weightData: [], averages: {}, targets: {}, heatmapData: [], heatmapStats: {total:0, green:0, yellow:0, red:0}, selectedMeals: [], macroComparisonData: [], macroSplit: {}, dailyTotals: {cal:0, p:0, c:0, f:0} };
     if (!data) return defaults;
+
+    // 1. Process History (FIXED: Uses getLocalDate for timezone awareness)
     const rawMap = {};
     (data.history || []).forEach(item => {
-      const d = item.date.includes('T') ? item.date.split('T')[0] : item.date;
+      const d = getLocalDate(item.date); // FIX APPLIED HERE
       if (!rawMap[d]) rawMap[d] = { date: d, calories: 0, p: 0, c: 0, f: 0 };
       rawMap[d].calories += (Number(item.calories) || 0);
       rawMap[d].p += (Number(item.p) || 0);
       rawMap[d].c += (Number(item.c) || 0);
       rawMap[d].f += (Number(item.f) || 0);
     });
+    
     let processed = Object.values(rawMap).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // 2. Filter Range
     const filterByRange = (arr) => {
       if (timeRange === 'all') return arr;
       const days = parseInt(timeRange);
       const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - days);
+      cutoff.setDate(new Date().getDate() - days); // Use today as anchor
       return arr.filter(d => new Date(d.date) >= cutoff);
     };
+
     const filteredHistory = filterByRange(processed);
+    
+    // 3. Weight + Smoothing (FIXED Timezone)
     let wData = (data.weightHistory || []).sort((a, b) => new Date(a.date) - new Date(b.date));
+    // Ensure weight dates are also treated as local if necessary
+    wData = wData.map(w => ({...w, date: getLocalDate(w.date)}));
+    
+    // Recalculate moving avg
     wData = wData.map((entry, index, arr) => {
       const start = Math.max(0, index - 6);
       const subset = arr.slice(start, index + 1);
@@ -155,6 +172,8 @@ function App() {
       return { ...entry, movingAvg: parseFloat(avg.toFixed(1)) };
     });
     const filteredWeight = filterByRange(wData);
+
+    // 4. Averages
     const totalDays = filteredHistory.length || 1;
     const avgs = {
       cal: Math.round(filteredHistory.reduce((s, i) => s + i.calories, 0) / totalDays),
@@ -163,6 +182,8 @@ function App() {
       f: Math.round(filteredHistory.reduce((s, i) => s + i.f, 0) / totalDays),
       weight: filteredWeight.length > 0 ? filteredWeight[filteredWeight.length - 1].weight : 0
     };
+
+    // 5. Targets
     const p = data.profile || {};
     const goalCal = parseInt(p.dailyGoal) || 2000;
     const t = { 
@@ -171,37 +192,63 @@ function App() {
       c: Math.round((goalCal * (parseInt(p.targetC) || 30) / 100) / 4),
       f: Math.round((goalCal * (parseInt(p.targetF) || 30) / 100) / 9),
     };
+
+    // 6. Macro Comparison Data
     const macroComp = [
       { name: 'Protein', actual: avgs.p, target: t.p, fill: '#EF4444', pct: Math.round((avgs.p/t.p)*100) },
       { name: 'Carbs', actual: avgs.c, target: t.c, fill: '#3B82F6', pct: Math.round((avgs.c/t.c)*100) },
       { name: 'Fat', actual: avgs.f, target: t.f, fill: '#F59E0B', pct: Math.round((avgs.f/t.f)*100) },
     ];
+
+    // 7. Actual Macro Split
     const totalCalsActual = (avgs.p * 4) + (avgs.c * 4) + (avgs.f * 9) || 1;
     const split = {
       p: Math.round(((avgs.p * 4) / totalCalsActual) * 100),
       c: Math.round(((avgs.c * 4) / totalCalsActual) * 100),
       f: Math.round(((avgs.f * 9) / totalCalsActual) * 100),
     };
+
+    // 8. Heatmap & Stats (FIXED: Use getLocalDate)
     const heatData = [];
     const stats = { total: 0, green: 0, yellow: 0, red: 0 };
     const today = new Date();
+    
     for (let i = 364; i >= 0; i--) {
       const d = new Date();
       d.setDate(today.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      // Construct YYYY-MM-DD from local time
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const dayStr = String(d.getDate()).padStart(2,'0');
+      const dateStr = `${y}-${m}-${dayStr}`;
+      
       const entry = rawMap[dateStr];
       let status = 'empty';
+      
       if (entry) {
         stats.total++;
         const ratio = entry.calories / (t.cal || 2000);
-        if (ratio > 1.1) { status = 'over'; stats.red++; } else if (ratio < 0.8) { status = 'under'; stats.yellow++; } else { status = 'good'; stats.green++; }
+        if (ratio > 1.1) {
+          status = 'over';
+          stats.red++;
+        } else if (ratio < 0.8) {
+          status = 'under';
+          stats.yellow++;
+        } else {
+          status = 'good';
+          stats.green++;
+        }
       }
       heatData.push({ date: dateStr, status, calories: entry ? entry.calories : 0 });
     }
+
+    // 9. Inspector (FIXED: Filter logic)
     let mealsForDay = [];
     let dTotals = { cal: 0, p: 0, c: 0, f: 0 };
     if (selectedDate && data.history) {
-      mealsForDay = data.history.filter(h => h.date && (h.date.startsWith(selectedDate)));
+      // We must check if the processed local date matches the selected date
+      mealsForDay = data.history.filter(h => getLocalDate(h.date) === selectedDate);
+      
       dTotals = mealsForDay.reduce((acc, curr) => ({
         cal: acc.cal + (Number(curr.calories) || 0),
         p: acc.p + (Number(curr.p) || 0),
@@ -209,11 +256,26 @@ function App() {
         f: acc.f + (Number(curr.f) || 0),
       }), { cal: 0, p: 0, c: 0, f: 0 });
     }
-    return { chartData: filteredHistory, weightData: filteredWeight, averages: avgs, targets: t, heatmapData: heatData, heatmapStats: stats, selectedMeals: mealsForDay, macroComparisonData: macroComp, macroSplit: split, dailyTotals: dTotals };
+
+    return { 
+      chartData: filteredHistory, weightData: filteredWeight, 
+      averages: avgs, targets: t, heatmapData: heatData, heatmapStats: stats,
+      selectedMeals: mealsForDay, macroComparisonData: macroComp, macroSplit: split, dailyTotals: dTotals 
+    };
   }, [data, timeRange, selectedDate]);
 
-  const onChartClick = (e) => { if (e && e.activePayload && e.activePayload.length > 0) { setSelectedDate(e.activePayload[0].payload.date); setShowInspector(true); } };
-  const onHeatmapClick = (date) => { setSelectedDate(date); setShowInspector(true); };
+  // --- CLICK HANDLERS ---
+  const onChartClick = (e) => {
+    if (e && e.activePayload && e.activePayload.length > 0) {
+      setSelectedDate(e.activePayload[0].payload.date);
+      setShowInspector(true);
+    }
+  };
+
+  const onHeatmapClick = (date) => {
+    setSelectedDate(date);
+    setShowInspector(true);
+  };
 
   return (
     <div className="min-h-screen p-4 md:p-8 font-sans text-gray-800 bg-gray-50 flex flex-col relative overflow-hidden">
