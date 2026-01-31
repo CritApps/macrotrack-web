@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 import QRCode from "react-qr-code";
 
+// --- VERSION TAG (Look for this on your screen!) ---
+const APP_VERSION = "v1.2"; 
+
 // --- FIREBASE CONFIG ---
 const firebaseConfig = {
   apiKey: "AIzaSyAgPz9CmmjWsaG8ZBeANDKd5mzi4GrQG-Y",
@@ -26,8 +29,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // --- HELPER 1: DATA BINNING (Timezone Aware) ---
-// Takes a raw UTC timestamp and converts it to the User's Local YYYY-MM-DD
-// Example: "2026-01-31T02:00:00Z" (9PM EST) -> "2026-01-30"
+// Converts UTC Timestamp -> "YYYY-MM-DD" based on your computer's clock
 const getLocalDateKey = (isoString) => {
   if (!isoString || !isoString.includes('T')) return isoString; 
   const date = new Date(isoString);
@@ -37,16 +39,23 @@ const getLocalDateKey = (isoString) => {
   return `${year}-${month}-${day}`;
 };
 
-// --- HELPER 2: DISPLAY FORMATTER (Strict) ---
-// Forces the "YYYY-MM-DD" string to display correctly without shifting
-// Example: "2026-01-31" -> "Saturday, January 31"
+// --- HELPER 2: DISPLAY FORMATTER (The "Dumb" Fix) ---
+// We treat the date string as text, not a time object. 
+// It is impossible for this to shift days because we don't do math.
 const formatDateLabel = (dateStr) => {
   if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-').map(Number);
-  // Creating date using (Year, MonthIndex, Day) constructor locks it to Local Midnight
-  // Note: Month is 0-indexed in JS (0 = Jan, 1 = Feb)
-  const dateObj = new Date(y, m - 1, d);
-  return dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const parts = dateStr.split('-'); // ["2026", "01", "31"]
+  if (parts.length !== 3) return dateStr;
+  
+  const y = parts[0];
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  
+  return `${monthNames[m - 1]} ${d}, ${y}`;
 };
 
 // --- CUSTOM COMPONENTS ---
@@ -148,7 +157,7 @@ function App() {
     const defaults = { chartData: [], weightData: [], averages: {}, targets: {}, heatmapData: [], heatmapStats: {total:0, green:0, yellow:0, red:0}, selectedMeals: [], macroComparisonData: [], macroSplit: {}, dailyTotals: {cal:0, p:0, c:0, f:0} };
     if (!data) return defaults;
 
-    // 1. Process History (Use getLocalDateKey to bin by local date)
+    // 1. Process History (Use getLocalDateKey)
     const rawMap = {};
     (data.history || []).forEach(item => {
       const d = getLocalDateKey(item.date); 
@@ -219,7 +228,7 @@ function App() {
       f: Math.round(((avgs.f * 9) / totalCalsActual) * 100),
     };
 
-    // 8. Heatmap & Stats (Uses getLocalDateKey for binning)
+    // 8. Heatmap & Stats
     const heatData = [];
     const stats = { total: 0, green: 0, yellow: 0, red: 0 };
     const today = new Date();
@@ -293,7 +302,12 @@ function App() {
       <header className="max-w-7xl mx-auto w-full mb-8 bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="bg-indigo-600 p-2 rounded-lg"><Activity className="text-white" size={24} /></div>
-          <div><h1 className="text-xl font-bold text-gray-900">MacroTrack</h1><p className="text-gray-500 text-xs">Analytics Console</p></div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              MacroTrack <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{APP_VERSION}</span>
+            </h1>
+            <p className="text-gray-500 text-xs">Analytics Console</p>
+          </div>
         </div>
         {!data ? (
           <div className="flex gap-2">
@@ -495,7 +509,7 @@ function App() {
           <div className="relative w-full max-w-md bg-white shadow-2xl h-full p-6 overflow-y-auto animate-slide-in flex flex-col">
             <div className="flex-none">
               <button onClick={() => setShowInspector(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
-              {/* FIXED: Using Manual Formatter */}
+              {/* FIXED: Using Manual "Dumb" Formatter */}
               <h2 className="text-2xl font-bold text-gray-900 mb-1">{formatDateLabel(selectedDate) || 'Log Details'}</h2>
               <p className="text-gray-500 mb-6">Daily Log Breakdown</p>
             </div>
