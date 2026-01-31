@@ -25,15 +25,28 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// --- HELPER: FIX TIMEZONE DATE ---
-// Converts UTC Timestamp -> "YYYY-MM-DD" in YOUR Local Time
-const getLocalDate = (isoString) => {
+// --- HELPER 1: DATA BINNING (Timezone Aware) ---
+// Takes a raw UTC timestamp and converts it to the User's Local YYYY-MM-DD
+// Example: "2026-01-31T02:00:00Z" (9PM EST) -> "2026-01-30"
+const getLocalDateKey = (isoString) => {
   if (!isoString || !isoString.includes('T')) return isoString; 
   const date = new Date(isoString);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+// --- HELPER 2: DISPLAY FORMATTER (Strict) ---
+// Forces the "YYYY-MM-DD" string to display correctly without shifting
+// Example: "2026-01-31" -> "Saturday, January 31"
+const formatDateLabel = (dateStr) => {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  // Creating date using (Year, MonthIndex, Day) constructor locks it to Local Midnight
+  // Note: Month is 0-indexed in JS (0 = Jan, 1 = Feb)
+  const dateObj = new Date(y, m - 1, d);
+  return dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 
 // --- CUSTOM COMPONENTS ---
@@ -135,10 +148,10 @@ function App() {
     const defaults = { chartData: [], weightData: [], averages: {}, targets: {}, heatmapData: [], heatmapStats: {total:0, green:0, yellow:0, red:0}, selectedMeals: [], macroComparisonData: [], macroSplit: {}, dailyTotals: {cal:0, p:0, c:0, f:0} };
     if (!data) return defaults;
 
-    // 1. Process History (Uses getLocalDate for timezone awareness)
+    // 1. Process History (Use getLocalDateKey to bin by local date)
     const rawMap = {};
     (data.history || []).forEach(item => {
-      const d = getLocalDate(item.date); 
+      const d = getLocalDateKey(item.date); 
       if (!rawMap[d]) rawMap[d] = { date: d, calories: 0, p: 0, c: 0, f: 0 };
       rawMap[d].calories += (Number(item.calories) || 0);
       rawMap[d].p += (Number(item.p) || 0);
@@ -161,7 +174,7 @@ function App() {
     
     // 3. Weight + Smoothing
     let wData = (data.weightHistory || []).sort((a, b) => new Date(a.date) - new Date(b.date));
-    wData = wData.map(w => ({...w, date: getLocalDate(w.date)}));
+    wData = wData.map(w => ({...w, date: getLocalDateKey(w.date)}));
     
     wData = wData.map((entry, index, arr) => {
       const start = Math.max(0, index - 6);
@@ -206,7 +219,7 @@ function App() {
       f: Math.round(((avgs.f * 9) / totalCalsActual) * 100),
     };
 
-    // 8. Heatmap & Stats
+    // 8. Heatmap & Stats (Uses getLocalDateKey for binning)
     const heatData = [];
     const stats = { total: 0, green: 0, yellow: 0, red: 0 };
     const today = new Date();
@@ -239,11 +252,11 @@ function App() {
       heatData.push({ date: dateStr, status, calories: entry ? entry.calories : 0 });
     }
 
-    // 9. Inspector (FIXED: Filter logic)
+    // 9. Inspector (Filter matches local key)
     let mealsForDay = [];
     let dTotals = { cal: 0, p: 0, c: 0, f: 0 };
     if (selectedDate && data.history) {
-      mealsForDay = data.history.filter(h => getLocalDate(h.date) === selectedDate);
+      mealsForDay = data.history.filter(h => getLocalDateKey(h.date) === selectedDate);
       
       dTotals = mealsForDay.reduce((acc, curr) => ({
         cal: acc.cal + (Number(curr.calories) || 0),
@@ -482,8 +495,8 @@ function App() {
           <div className="relative w-full max-w-md bg-white shadow-2xl h-full p-6 overflow-y-auto animate-slide-in flex flex-col">
             <div className="flex-none">
               <button onClick={() => setShowInspector(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
-              {/* FIXED: Manually append time to force local parsing */}
-              <h2 className="text-2xl font-bold text-gray-900 mb-1">{selectedDate ? new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'}) : 'Log Details'}</h2>
+              {/* FIXED: Using Manual Formatter */}
+              <h2 className="text-2xl font-bold text-gray-900 mb-1">{formatDateLabel(selectedDate) || 'Log Details'}</h2>
               <p className="text-gray-500 mb-6">Daily Log Breakdown</p>
             </div>
             
